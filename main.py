@@ -38,6 +38,7 @@ class CYDApplication:
         
         # Connection status
         self.pc_connected = False
+        self.usb_connected = False
         self.last_system_update = 0
         self.last_heartbeat = 0
         
@@ -46,12 +47,12 @@ class CYDApplication:
         
     def setup_ui_layout(self):
         """Setup UI layout with smaller buttons and system info area"""
-        # Button configuration - smaller to make room for system info
-        self.button_width = 80
+        # Button configuration - smaller to fit all buttons on screen
+        self.button_width = 70  # Reduced from 80
         self.button_height = 35
-        self.button_spacing = 10
+        self.button_spacing = 8  # Reduced from 10
         
-        # Calculate button positions (top row)
+        # Calculate button positions (top row) - ensure they fit in 240px width
         button_start_x = (self.width - (3 * self.button_width + 2 * self.button_spacing)) // 2
         button_y = 30
         
@@ -87,29 +88,34 @@ class CYDApplication:
         self.audio_manager.play_startup_tone()
         print("Audio initialized")
         
-        # Initialize serial communication (use UART 2 to avoid conflict with USB)
+        # Initialize serial communication (use UART 2 to avoid conflict with USB debug)
         self.serial_comm = init_serial_comm(uart_id=2, tx_pin=17, rx_pin=16)
         self.serial_comm.set_message_callback(self.handle_pc_message)
         self.serial_comm.set_connection_callback(self.handle_connection_change)
         
-        # Try to connect
+        # Try to connect UART 2
         if self.serial_comm.init_uart():
-            print("Serial communication initialized")
+            print("UART 2 serial communication initialized")
         else:
-            print("Serial communication failed to initialize - will retry")
+            print("UART 2 serial communication failed to initialize - will retry")
         
     def handle_pc_message(self, message, is_json):
         """Handle messages received from PC"""
+        # Debug: Echo all received messages
+        print(f"RECEIVED: {'JSON' if is_json else 'TEXT'}: {message}")
+        
         if is_json:
             message_type = message.get("type")
+            print(f"JSON Message Type: {message_type}")
             
             if message_type == MessageType.SYSTEM_DATA:
                 # Update system data
                 data = extract_system_data(message)
+                print(f"Extracted system data: {data}")
                 if data:
                     self.system_data.update(data)
                     self.last_system_update = time.time()
-                    print("System data updated")
+                    print("System data updated from JSON")
                     
             elif message_type == MessageType.ACK:
                 # Handle command acknowledgment
@@ -122,8 +128,68 @@ class CYDApplication:
                 state = message.get("state")
                 print(f"PC Status: {state}")
         else:
-            # Non-JSON message (debug output)
+            # Non-JSON message (debug output) - check for data messages
+            if message.startswith("ESP32_DATA:"):
+                print(f"Found ESP32_DATA message: {message}")
+                if self.parse_esp32_data(message):
+                    return  # Successfully parsed data, don't print as debug
+            elif message.startswith("PC_SYSTEM_DATA:"):
+                print(f"Found PC_SYSTEM_DATA message: {message}")
+                if self.parse_debug_system_data(message):
+                    return  # Successfully parsed data, don't print as debug
             print(f"PC: {message}")
+    
+    def parse_esp32_data(self, debug_message):
+        """Parse system data from ESP32_DATA debug output"""
+        try:
+            if debug_message.startswith("ESP32_DATA:"):
+                json_str = debug_message.split("ESP32_DATA:")[1].strip()
+                # Try to parse the JSON using the same method as regular messages
+                from json_protocol import parse_message
+                message = parse_message(json_str)
+                
+                if message and message.get("type") == MessageType.SYSTEM_DATA:
+                    data = extract_system_data(message)
+                    if data:
+                        self.system_data.update(data)
+                        self.last_system_update = time.time()
+                        print("System data updated from ESP32_DATA")
+                        return True
+        except Exception as e:
+            print(f"Error parsing ESP32_DATA: {e}")
+        return False
+    
+    def parse_debug_system_data(self, debug_message):
+        """Parse system data from debug output"""
+        try:
+            if debug_message.startswith("PC_SYSTEM_DATA:"):
+                json_str = debug_message.split("PC_SYSTEM_DATA:")[1].strip()
+                # Try to parse the JSON using the same method as regular messages
+                from json_protocol import parse_message
+                message = parse_message(json_str)
+                
+                if message and message.get("type") == MessageType.SYSTEM_DATA:
+                    data = extract_system_data(message)
+                    if data:
+                        self.system_data.update(data)
+                        self.last_system_update = time.time()
+                        print("System data updated from PC_SYSTEM_DATA")
+                        return True
+        except Exception as e:
+            print(f"Error parsing PC_SYSTEM_DATA: {e}")
+        return False
+    
+    def reset_system_data(self):
+        """Reset system data to show no data available"""
+        self.system_data = {
+            "date": "No Data",
+            "time": "No Data",
+            "cpu_percent": 0.0,
+            "ram_used_gb": 0.0,
+            "ram_total_gb": 0.0,
+            "network_sent_mb": 0.0,
+            "network_recv_mb": 0.0
+        }
     
     def handle_connection_change(self, connected):
         """Handle serial connection state changes"""
@@ -139,12 +205,21 @@ class CYDApplication:
         self.display_manager.clear_screen()
         
         # Draw title
-        self.display.text("ESP32 CYD Control", 10, 5, 0xFFFF)
+        self.display.draw_text8x8(10, 5, "ESP32 CYD Control", 0xFFFF)
         
-        # Draw connection status
-        status_text = "PC: Connected" if self.pc_connected else "PC: Disconnected"
-        status_color = 0x07E0 if self.pc_connected else 0xF800  # Green if connected, Red if not
-        self.display.text(status_text, 200, 5, status_color)
+        # Draw connection status based on actual data reception
+        current_time = time.time()
+        data_is_fresh = (self.last_system_update > 0 and 
+                        current_time - self.last_system_update < 30.0)
+        
+        if data_is_fresh:
+            status_text = "OK"
+            status_color = 0x07E0  # Green - receiving data
+        else:
+            status_text = "..."
+            status_color = 0xF800  # Red - no data
+        
+        self.display.draw_text8x8(200, 5, status_text, status_color)
         
         # Draw buttons
         for button in self.buttons:
@@ -157,24 +232,25 @@ class CYDApplication:
         """Draw system information received from PC"""
         y = self.info_start_y
         
-        # Date and Time
-        date_time = f"{self.system_data['date']} {self.system_data['time']}"
-        self.display.text(f"Date/Time: {date_time}", 10, y, 0xFFFF)
+        # Date and Time - split into two lines for better readability
+        self.display.draw_text8x8(10, y, f"Date: {self.system_data['date']}", 0xFFFF)
+        y += self.info_line_height
+        self.display.draw_text8x8(10, y, f"Time: {self.system_data['time']}", 0xFFFF)
         y += self.info_line_height
         
         # CPU Usage
         cpu_text = f"CPU: {self.system_data['cpu_percent']:.1f}%"
-        self.display.text(cpu_text, 10, y, 0xFFE0)  # Yellow
+        self.display.draw_text8x8(10, y, cpu_text, 0xFFE0)  # Yellow
         y += self.info_line_height
         
         # RAM Usage
         ram_text = f"RAM: {self.system_data['ram_used_gb']:.1f}/{self.system_data['ram_total_gb']:.1f} GB"
-        self.display.text(ram_text, 10, y, 0x07FF)  # Cyan
+        self.display.draw_text8x8(10, y, ram_text, 0x07FF)  # Cyan
         y += self.info_line_height
         
         # Network Usage
         net_text = f"NET: U:{self.system_data['network_sent_mb']:.1f} D:{self.system_data['network_recv_mb']:.1f} MB"
-        self.display.text(net_text, 10, y, 0xF81F)  # Magenta
+        self.display.draw_text8x8(10, y, net_text, 0xF81F)  # Magenta
         
         # Last update time
         if self.last_system_update > 0:
@@ -183,7 +259,7 @@ class CYDApplication:
                 age_text = f"Updated {age:.0f}s ago"
             else:
                 age_text = "Data outdated"
-            self.display.text(age_text, 10, y + self.info_line_height, 0x8410)  # Gray
+            self.display.draw_text8x8(10, y + self.info_line_height, age_text, 0x8410)  # Gray
     
     def handle_button_press(self, button_index):
         """Handle button press with audio feedback and command execution"""
@@ -194,20 +270,25 @@ class CYDApplication:
         button.draw(self.display)
         
         # Audio feedback
-        self.audio_manager.play_beep()
+        self.audio_manager.play_button_click_tone()
         
         # Get command
         command_name = button.text
         print(f"Button pressed: {command_name}")
         
-        # Send command to PC
+        # Send command to PC via both UART and USB debug output
+        command_upper = command_name.upper()
+        
+        # Send via UART (if connected)
         if self.pc_connected:
-            if send_command(command_name.upper()):
-                print(f"Command {command_name} sent to PC")
+            if send_command(command_upper):
+                print(f"Command {command_name} sent via UART")
             else:
-                print(f"Failed to send command {command_name}")
-        else:
-            print("Cannot send command - PC not connected")
+                print(f"Failed to send command via UART")
+        
+        # Also send via USB debug output for PC Service to parse
+        print(f"PC_COMMAND:{command_upper}")
+        print(f"Command {command_name} sent to PC")
         
         # Wait a bit then restore button
         time.sleep(0.2)
@@ -228,15 +309,29 @@ class CYDApplication:
     
     def update_communication(self):
         """Update serial communication"""
-        # Check for incoming messages
+        # Check for incoming messages from UART 2
         check_messages()
         
         # Try to reconnect if not connected
         if not is_connected():
             try_reconnect()
         
-        # Send periodic heartbeat
+        # TEMPORARY: Update with test data to verify display works
         current_time = time.time()
+        if current_time - self.last_system_update > 10:  # Every 10 seconds
+            self.system_data.update({
+                "date": "2025-07-02",
+                "time": "17:25:xx",
+                "cpu_percent": 15.5,
+                "ram_used_gb": 19.0,
+                "ram_total_gb": 31.7,
+                "network_sent_mb": 73.1,
+                "network_recv_mb": 184.3
+            })
+            self.last_system_update = current_time
+            print("TEST: System data updated with test values")
+        
+        # Send periodic heartbeat
         if current_time - self.last_heartbeat > 30:  # Every 30 seconds
             if self.serial_comm and self.serial_comm.is_connected:
                 self.serial_comm.send_heartbeat()
@@ -268,7 +363,7 @@ class CYDApplication:
                 self.update_communication()
                 
                 # Update UI periodically
-                if current_time - last_ui_update > 5.0:  # Every 5 seconds
+                if current_time - last_ui_update > 10.0:  # Every 10 seconds
                     self.draw_interface()
                     last_ui_update = current_time
                 

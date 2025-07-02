@@ -196,9 +196,13 @@ class SerialComm:
     
     def send_heartbeat(self) -> bool:
         """Send a heartbeat message"""
-        from json_protocol import create_heartbeat_message
-        heartbeat = create_heartbeat_message()
-        return self.send_message(heartbeat)
+        try:
+            from json_protocol import create_heartbeat_message
+            heartbeat = create_heartbeat_message()
+            return self.send_message(heartbeat)
+        except Exception as e:
+            print(f"Error sending heartbeat: {e}")
+            return False
     
     def send_command(self, action: str) -> bool:
         """Send a command message"""

@@ -136,4 +136,3 @@ echo - Some ESP32 boards require holding the BOOT button while pressing reset
 echo ===================================
 
 :end
-pause

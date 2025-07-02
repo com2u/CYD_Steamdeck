@@ -88,7 +88,21 @@ class ServiceManager:
     
     def _handle_received_message(self, raw_message: str):
         """Handle messages received from ESP32"""
-        # Try to parse as JSON first
+        # Check for PC_COMMAND: prefix in debug output
+        if raw_message.startswith("PC_COMMAND:"):
+            command = raw_message.split("PC_COMMAND:")[1].strip()
+            print(f"Received command from ESP32 debug: {command}")
+            
+            # Create a command message and handle it
+            command_message = {
+                "type": "command",
+                "action": command,
+                "timestamp": time.time()
+            }
+            self._handle_command_message(command_message)
+            return
+        
+        # Try to parse as JSON
         message = parse_message(raw_message)
         
         if message:
@@ -194,15 +208,24 @@ class ServiceManager:
     def _send_system_update(self):
         """Send system information to ESP32"""
         try:
-            if not self.serial_handler or not self.serial_handler.is_connected:
-                return
-            
             # Get system data
             system_data = get_system_data()
             
-            # Create and send system data message
+            # Create system data message
             message = create_system_data_message(system_data)
-            self.serial_handler.send_message(message)
+            
+            # Send via serial connection (this goes to ESP32's USB serial)
+            if self.serial_handler and self.serial_handler.is_connected:
+                # Send the JSON message directly
+                self.serial_handler.send_message(message)
+                # Also send a debug marker that ESP32 can parse
+                self.serial_handler.send_message(f"ESP32_DATA:{message.strip()}")
+                print("System data sent to ESP32 via serial")
+            else:
+                print("No serial connection - system data not sent")
+            
+            # ALSO send via debug output that ESP32 can see
+            print(f"PC_SYSTEM_DATA:{message.strip()}")
             
             # Log summary
             summary = get_formatted_summary()
