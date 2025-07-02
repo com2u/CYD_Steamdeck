@@ -121,36 +121,6 @@ class ButtonManager:
             
         return self.buttons
     
-    def create_custom_buttons(self, button_width, display_height, button_texts,
-                             text_color=None, bg_color=None, border_color=None):
-        """
-        Create custom width buttons that divide the screen vertically
-        
-        Args:
-            button_width: Width of the buttons
-            display_height: Height of the display
-            button_texts: List of button text strings
-            text_color: Text color for all buttons
-            bg_color: Background color for all buttons
-            border_color: Border color for all buttons
-        """
-        num_buttons = len(button_texts)
-        button_height = display_height // num_buttons
-        
-        for i, text in enumerate(button_texts):
-            y = i * button_height
-            # Make sure the last button fills any remaining space
-            if i == num_buttons - 1:
-                height = display_height - y
-            else:
-                height = button_height
-                
-            button = Button(0, y, button_width, height, text, 
-                          text_color, bg_color, border_color)
-            self.add_button(button)
-            
-        return self.buttons
-    
     def draw_all(self, display):
         """Draw all buttons on the display"""
         for button in self.buttons:

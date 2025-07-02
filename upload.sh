@@ -68,21 +68,35 @@ if [ $? -ne 0 ]; then
     ERROR=1
 fi
 
-echo "7/9 Uploading commands.py..."
+echo "7/11 Uploading commands.py..."
 python -m mpremote connect $PORT cp commands.py :commands.py
 if [ $? -ne 0 ]; then
     echo "Failed to upload commands.py"
     ERROR=1
 fi
 
-echo "8/9 Uploading audio.py..."
+echo "8/11 Uploading audio.py..."
 python -m mpremote connect $PORT cp audio.py :audio.py
 if [ $? -ne 0 ]; then
     echo "Failed to upload audio.py"
     ERROR=1
 fi
 
-echo "9/9 Uploading main.py..."
+echo "9/11 Uploading json_protocol.py..."
+python -m mpremote connect $PORT cp json_protocol.py :json_protocol.py
+if [ $? -ne 0 ]; then
+    echo "Failed to upload json_protocol.py"
+    ERROR=1
+fi
+
+echo "10/11 Uploading serial_comm.py..."
+python -m mpremote connect $PORT cp serial_comm.py :serial_comm.py
+if [ $? -ne 0 ]; then
+    echo "Failed to upload serial_comm.py"
+    ERROR=1
+fi
+
+echo "11/11 Uploading main.py..."
 python -m mpremote connect $PORT cp main.py :main.py
 if [ $? -ne 0 ]; then
     echo "Failed to upload main.py"

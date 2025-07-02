@@ -62,21 +62,35 @@ if %errorlevel% neq 0 (
     set ERROR=1
 )
 
-echo 7/9 Uploading commands.py...
+echo 7/11 Uploading commands.py...
 python -m mpremote connect %PORT% cp commands.py :commands.py
 if %errorlevel% neq 0 (
     echo Failed to upload commands.py
     set ERROR=1
 )
 
-echo 8/9 Uploading audio.py...
+echo 8/11 Uploading audio.py...
 python -m mpremote connect %PORT% cp audio.py :audio.py
 if %errorlevel% neq 0 (
     echo Failed to upload audio.py
     set ERROR=1
 )
 
-echo 9/9 Uploading main.py...
+echo 9/11 Uploading json_protocol.py...
+python -m mpremote connect %PORT% cp json_protocol.py :json_protocol.py
+if %errorlevel% neq 0 (
+    echo Failed to upload json_protocol.py
+    set ERROR=1
+)
+
+echo 10/11 Uploading serial_comm.py...
+python -m mpremote connect %PORT% cp serial_comm.py :serial_comm.py
+if %errorlevel% neq 0 (
+    echo Failed to upload serial_comm.py
+    set ERROR=1
+)
+
+echo 11/11 Uploading main.py...
 python -m mpremote connect %PORT% cp main.py :main.py
 if %ERRORLEVEL% NEQ 0 (
     echo Failed to upload main.py

@@ -1,201 +1,257 @@
 """
-Serial Communication module for ESP32-2432S028R (Cheap Yellow Display)
-Handles bidirectional communication with PC service via USB serial
+Serial Communication module for ESP32 CYD
+Handles UART communication with PC with robust reconnection
 """
-import json
 import time
-from machine import UART, Pin
+from machine import UART
+from json_protocol import parse_message, is_json_line
+
 
 class SerialComm:
     """Handles serial communication with PC"""
     
     def __init__(self, uart_id=0, baudrate=115200, tx_pin=1, rx_pin=3):
-        """
-        Initialize serial communication
+        self.uart_id = uart_id
+        self.baudrate = baudrate
+        self.tx_pin = tx_pin
+        self.rx_pin = rx_pin
+        self.uart = None
+        self.is_connected = False
+        self.last_connection_attempt = 0
+        self.connection_retry_delay = 2.0  # seconds
         
-        Args:
-            uart_id: UART interface ID (0 for USB serial)
-            baudrate: Communication speed
-            tx_pin: TX pin (default 1 for USB)
-            rx_pin: RX pin (default 3 for USB)
-        """
-        self.uart = UART(uart_id, baudrate=baudrate, tx=Pin(tx_pin), rx=Pin(rx_pin))
-        self.uart.init(baudrate=baudrate, bits=8, parity=None, stop=1)
-        self.connected = False
-        self.last_heartbeat = 0
-        self.heartbeat_interval = 5000  # 5 seconds
+        # Message handling
+        self.on_message_received = None
+        self.on_connection_changed = None
         
-    def send_command(self, action):
-        """
-        Send command to PC
+        # Statistics
+        self.messages_sent = 0
+        self.messages_received = 0
+        self.connection_attempts = 0
         
-        Args:
-            action: Command action string (e.g., "init", "test", "exit")
-        """
+        # Buffer for incomplete messages
+        self.receive_buffer = ""
+        
+        print("SerialComm initialized")
+    
+    def init_uart(self) -> bool:
+        """Initialize UART connection"""
         try:
-            message = {
-                "type": "command",
-                "action": action,
-                "timestamp": time.ticks_ms()
-            }
+            print(f"Initializing UART {self.uart_id} at {self.baudrate} baud...")
+            self.connection_attempts += 1
             
-            json_str = json.dumps(message) + "\n"
-            self.uart.write(json_str.encode('utf-8'))
-            print(f"Sent command: {action}")
-            return True
+            # Initialize UART
+            self.uart = UART(self.uart_id, baudrate=self.baudrate, tx=self.tx_pin, rx=self.rx_pin)
             
+            if self.uart:
+                self.is_connected = True
+                print("UART initialized successfully")
+                
+                # Notify connection change
+                if self.on_connection_changed:
+                    self.on_connection_changed(True)
+                
+                return True
+            else:
+                print("Failed to initialize UART")
+                return False
+                
         except Exception as e:
-            print(f"Error sending command: {e}")
+            print(f"UART initialization error: {e}")
             return False
     
-    def send_heartbeat(self):
-        """Send heartbeat to maintain connection"""
-        current_time = time.ticks_ms()
-        if time.ticks_diff(current_time, self.last_heartbeat) > self.heartbeat_interval:
+    def deinit_uart(self):
+        """Deinitialize UART connection"""
+        if self.uart:
             try:
-                message = {
-                    "type": "heartbeat",
-                    "timestamp": current_time
-                }
-                json_str = json.dumps(message) + "\n"
-                self.uart.write(json_str.encode('utf-8'))
-                self.last_heartbeat = current_time
-                return True
+                self.uart.deinit()
+                print("UART deinitialized")
             except Exception as e:
-                print(f"Error sending heartbeat: {e}")
-                return False
-        return True
-    
-    def read_system_data(self):
-        """
-        Read system data from PC
+                print(f"Error deinitializing UART: {e}")
+            finally:
+                self.uart = None
         
-        Returns:
-            dict: System data or None if no data available
-        """
+        if self.is_connected:
+            self.is_connected = False
+            # Notify connection change
+            if self.on_connection_changed:
+                self.on_connection_changed(False)
+    
+    def send_message(self, message: str) -> bool:
+        """Send a message to PC"""
+        if not self.is_connected or not self.uart:
+            print("Cannot send message: UART not connected")
+            return False
+        
         try:
+            # Ensure message ends with newline
+            if not message.endswith('\n'):
+                message += '\n'
+            
+            # Send message
+            bytes_written = self.uart.write(message.encode('utf-8'))
+            
+            if bytes_written:
+                self.messages_sent += 1
+                print(f"Sent: {message.strip()}")
+                return True
+            else:
+                print("Failed to send message")
+                return False
+                
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            self._handle_connection_error()
+            return False
+    
+    def check_for_messages(self):
+        """Check for incoming messages from PC"""
+        if not self.is_connected or not self.uart:
+            return
+        
+        try:
+            # Check if data is available
             if self.uart.any():
                 # Read available data
                 data = self.uart.read()
                 if data:
-                    # Convert bytes to string
-                    data_str = data.decode('utf-8').strip()
+                    # Decode and add to buffer
+                    text = data.decode('utf-8', errors='ignore')
+                    self.receive_buffer += text
                     
-                    # Handle multiple messages (split by newlines)
-                    lines = data_str.split('\n')
+                    # Process complete lines
+                    self._process_receive_buffer()
                     
-                    for line in lines:
-                        if line.strip():
-                            try:
-                                message = json.loads(line.strip())
-                                if message.get("type") == "system_data":
-                                    self.connected = True
-                                    return message
-                                elif message.get("type") == "heartbeat_ack":
-                                    self.connected = True
-                            except json.JSONDecodeError:
-                                print(f"Invalid JSON received: {line}")
-                                continue
-                                
         except Exception as e:
-            print(f"Error reading system data: {e}")
-            self.connected = False
+            print(f"Error reading from UART: {e}")
+            self._handle_connection_error()
+    
+    def _process_receive_buffer(self):
+        """Process the receive buffer for complete messages"""
+        while '\n' in self.receive_buffer:
+            # Extract one complete line
+            line, self.receive_buffer = self.receive_buffer.split('\n', 1)
+            line = line.strip()
             
-        return None
+            if line:
+                self.messages_received += 1
+                self._handle_received_message(line)
     
-    def is_connected(self):
-        """Check if connected to PC service"""
-        return self.connected
-    
-    def set_connected(self, status):
-        """Set connection status"""
-        self.connected = status
-    
-    def flush_input(self):
-        """Flush input buffer"""
-        try:
-            while self.uart.any():
-                self.uart.read()
-        except Exception as e:
-            print(f"Error flushing input: {e}")
-
-
-class SystemDataManager:
-    """Manages system data received from PC"""
-    
-    def __init__(self):
-        self.cpu_usage = 0.0
-        self.ram_used = 0.0
-        self.ram_total = 0.0
-        self.net_sent = 0
-        self.net_recv = 0
-        self.date = "----/--/--"
-        self.time = "--:--:--"
-        self.last_update = 0
-        self.data_timeout = 10000  # 10 seconds
+    def _handle_received_message(self, message: str):
+        """Handle a received message"""
+        # Try to parse as JSON first
+        parsed_message = parse_message(message)
         
-    def update_data(self, system_data):
-        """
-        Update system data from received message
-        
-        Args:
-            system_data: Dictionary containing system information
-        """
-        try:
-            self.cpu_usage = system_data.get("cpu", 0.0)
-            self.ram_used = system_data.get("ram_used", 0.0)
-            self.ram_total = system_data.get("ram_total", 0.0)
-            self.net_sent = system_data.get("net_sent", 0)
-            self.net_recv = system_data.get("net_recv", 0)
-            self.date = system_data.get("date", "----/--/--")
-            self.time = system_data.get("time", "--:--:--")
-            self.last_update = time.ticks_ms()
-            
-            print(f"System data updated - CPU: {self.cpu_usage}%, RAM: {self.ram_used}/{self.ram_total}GB")
-            
-        except Exception as e:
-            print(f"Error updating system data: {e}")
-    
-    def is_data_fresh(self):
-        """Check if system data is recent"""
-        current_time = time.ticks_ms()
-        return time.ticks_diff(current_time, self.last_update) < self.data_timeout
-    
-    def get_cpu_percentage(self):
-        """Get CPU usage as percentage"""
-        return self.cpu_usage if self.is_data_fresh() else 0.0
-    
-    def get_ram_info(self):
-        """Get RAM usage information"""
-        if self.is_data_fresh():
-            return self.ram_used, self.ram_total
-        return 0.0, 0.0
-    
-    def get_ram_percentage(self):
-        """Get RAM usage as percentage"""
-        if self.is_data_fresh() and self.ram_total > 0:
-            return (self.ram_used / self.ram_total) * 100
-        return 0.0
-    
-    def get_network_info(self):
-        """Get network transfer information"""
-        if self.is_data_fresh():
-            return self.net_sent, self.net_recv
-        return 0, 0
-    
-    def get_datetime_info(self):
-        """Get date and time information"""
-        if self.is_data_fresh():
-            return self.date, self.time
-        return "----/--/--", "--:--:--"
-    
-    def format_bytes(self, bytes_value):
-        """Format bytes to human readable format"""
-        if bytes_value < 1024:
-            return f"{bytes_value}B"
-        elif bytes_value < 1024 * 1024:
-            return f"{bytes_value/1024:.1f}KB"
-        elif bytes_value < 1024 * 1024 * 1024:
-            return f"{bytes_value/(1024*1024):.1f}MB"
+        if parsed_message:
+            # Valid JSON message
+            print(f"JSON received: {message}")
+            if self.on_message_received:
+                self.on_message_received(parsed_message, True)  # True = is_json
         else:
-            return f"{bytes_value/(1024*1024*1024):.1f}GB"
+            # Not JSON, treat as debug/status message
+            print(f"PC Debug: {message}")
+            if self.on_message_received:
+                self.on_message_received(message, False)  # False = not_json
+    
+    def _handle_connection_error(self):
+        """Handle connection errors"""
+        print("Connection error detected, marking as disconnected")
+        self.deinit_uart()
+    
+    def try_reconnect(self) -> bool:
+        """Try to reconnect if not connected"""
+        current_time = time.time()
+        
+        # Check if enough time has passed since last attempt
+        if current_time - self.last_connection_attempt < self.connection_retry_delay:
+            return False
+        
+        self.last_connection_attempt = current_time
+        
+        if not self.is_connected:
+            print("Attempting to reconnect UART...")
+            return self.init_uart()
+        
+        return True
+    
+    def get_status(self) -> dict:
+        """Get connection status and statistics"""
+        return {
+            "connected": self.is_connected,
+            "uart_id": self.uart_id,
+            "baudrate": self.baudrate,
+            "messages_sent": self.messages_sent,
+            "messages_received": self.messages_received,
+            "connection_attempts": self.connection_attempts,
+            "buffer_length": len(self.receive_buffer)
+        }
+    
+    def set_message_callback(self, callback):
+        """Set callback for received messages"""
+        self.on_message_received = callback
+    
+    def set_connection_callback(self, callback):
+        """Set callback for connection state changes"""
+        self.on_connection_changed = callback
+    
+    def send_heartbeat(self) -> bool:
+        """Send a heartbeat message"""
+        from json_protocol import create_heartbeat_message
+        heartbeat = create_heartbeat_message()
+        return self.send_message(heartbeat)
+    
+    def send_command(self, action: str) -> bool:
+        """Send a command message"""
+        from json_protocol import create_command_message
+        command = create_command_message(action)
+        return self.send_message(command)
+
+
+# Global serial communication instance
+serial_comm = None
+
+
+def init_serial_comm(uart_id=0, baudrate=115200, tx_pin=1, rx_pin=3) -> SerialComm:
+    """Initialize global serial communication"""
+    global serial_comm
+    serial_comm = SerialComm(uart_id, baudrate, tx_pin, rx_pin)
+    return serial_comm
+
+
+def get_serial_comm() -> SerialComm:
+    """Get the global serial communication instance"""
+    return serial_comm
+
+
+def send_message(message: str) -> bool:
+    """Convenience function to send message"""
+    if serial_comm:
+        return serial_comm.send_message(message)
+    return False
+
+
+def send_command(action: str) -> bool:
+    """Convenience function to send command"""
+    if serial_comm:
+        return serial_comm.send_command(action)
+    return False
+
+
+def check_messages():
+    """Convenience function to check for messages"""
+    if serial_comm:
+        serial_comm.check_for_messages()
+
+
+def try_reconnect() -> bool:
+    """Convenience function to try reconnection"""
+    if serial_comm:
+        return serial_comm.try_reconnect()
+    return False
+
+
+def is_connected() -> bool:
+    """Convenience function to check connection status"""
+    if serial_comm:
+        return serial_comm.is_connected
+    return False

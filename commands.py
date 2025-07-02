@@ -1,11 +1,8 @@
 """
 Commands module for ESP32-2432S028R (Cheap Yellow Display)
 Handles button creation, command structure, and button event handling
-Enhanced with PC communication and system data display
 """
 from button import ButtonManager, ButtonColors
-from serial_comm import SerialComm, SystemDataManager
-from ili9341 import color565
 
 class CommandHandler:
     """Handles all command-related functionality and button management"""
@@ -16,23 +13,14 @@ class CommandHandler:
         self.button_manager = ButtonManager()
         self.buttons = []
         
-        # PC Communication
-        self.serial_comm = SerialComm()
-        self.system_data = SystemDataManager()
-        
-        # Display layout
-        self.button_width = 120  # Buttons take left half
-        self.info_width = 120    # System info takes right half
-        self.info_x_offset = 120 # Start info display at x=120
-        
     def create_button_interface(self):
-        """Create the main button interface with split layout"""
+        """Create the main button interface"""
         width, height = self.display_manager.get_dimensions()
         
-        # Create buttons for left half only
-        button_texts = ["Init", "Test", "Exit"]
-        self.buttons = self.button_manager.create_custom_buttons(
-            self.button_width, height, button_texts,
+        # Create buttons
+        button_texts = ["Init", "Setup", "Test", "Calibrate", "Exit"]
+        self.buttons = self.button_manager.create_full_width_buttons(
+            width, height, button_texts,
             text_color=ButtonColors.BUTTON_TEXT,
             bg_color=ButtonColors.BUTTON_BG,
             border_color=ButtonColors.BUTTON_BORDER
@@ -40,17 +28,18 @@ class CommandHandler:
         
         # Set button callbacks
         self.button_manager.get_button_by_text("Init").set_callback(self.on_init_button)
+        self.button_manager.get_button_by_text("Setup").set_callback(self.on_setup_button)
         self.button_manager.get_button_by_text("Test").set_callback(self.on_test_button)
+        self.button_manager.get_button_by_text("Calibrate").set_callback(self.on_calibrate_button)
         self.button_manager.get_button_by_text("Exit").set_callback(self.on_exit_button)
         
         return self.buttons
     
     def draw_interface(self):
-        """Draw the button interface and system info on the display"""
+        """Draw the button interface on the display"""
         if self.display_manager.display:
             self.display_manager.clear_screen()
             self.button_manager.draw_all(self.display_manager.display)
-            self.draw_system_info()
     
     def handle_touch_down(self, x, y):
         """Handle touch down event"""
@@ -78,88 +67,70 @@ class CommandHandler:
     
     # Button callback functions
     def on_init_button(self, button):
-        """Handle Init button click - Send command to PC"""
-        print("Init button clicked - Sending command to PC...")
-        self.serial_comm.send_command("init")
+        """Handle Init button click"""
+        print("Init button callback triggered!")
+        print("Init button clicked - Initializing system...")
+        self.execute_init_command()
+    
+    def on_setup_button(self, button):
+        """Handle Setup button click"""
+        print("Setup button clicked - Opening setup menu...")
+        self.execute_setup_command()
     
     def on_test_button(self, button):
-        """Handle Test button click - Send command to PC"""
-        print("Test button clicked - Sending command to PC...")
-        self.serial_comm.send_command("test")
+        """Handle Test button click"""
+        print("Test button clicked - Running tests...")
+        self.execute_test_command()
+    
+    def on_calibrate_button(self, button):
+        """Handle Calibrate button click"""
+        print("Calibrate button clicked - Starting calibration...")
+        self.execute_calibrate_command()
     
     def on_exit_button(self, button):
-        """Handle Exit button click - Send command to PC"""
-        print("Exit button clicked - Sending command to PC...")
-        self.serial_comm.send_command("exit")
+        """Handle Exit button click"""
+        print("Exit button clicked - Exiting application...")
+        self.execute_exit_command()
     
-    # Communication and display functions
-    def update_system_data(self):
-        """Update system data from PC"""
-        data = self.serial_comm.read_system_data()
-        if data:
-            self.system_data.update_data(data)
-            return True
-        return False
+    # Command execution functions
+    def execute_init_command(self):
+        """Execute initialization command"""
+        print("=== INIT COMMAND ===")
+        print("Initializing system components...")
+        # Add your initialization logic here
+        print("System initialized successfully!")
     
-    def send_heartbeat(self):
-        """Send heartbeat to PC"""
-        return self.serial_comm.send_heartbeat()
+    def execute_setup_command(self):
+        """Execute setup command"""
+        print("=== SETUP COMMAND ===")
+        print("Opening setup configuration...")
+        # Add your setup logic here
+        print("Setup configuration opened!")
     
-    def is_pc_connected(self):
-        """Check if PC is connected"""
-        return self.serial_comm.is_connected()
+    def execute_test_command(self):
+        """Execute test command"""
+        print("=== TEST COMMAND ===")
+        print("Running system tests...")
+        # Test display
+        if self.display_manager:
+            self.display_manager.test_display()
+        print("System tests completed!")
     
-    def draw_system_info(self):
-        """Draw system information on the right side of display"""
-        if not self.display_manager.display:
-            return
-            
-        display = self.display_manager.display
-        x_start = self.info_x_offset
-        y_pos = 10
-        line_height = 25
-        
-        # Colors
-        text_color = color565(255, 255, 255)  # White
-        label_color = color565(200, 200, 200)  # Light gray
-        value_color = color565(0, 255, 0)     # Green
-        
-        # Connection status
-        conn_status = "CONN" if self.is_pc_connected() else "DISC"
-        conn_color = color565(0, 255, 0) if self.is_pc_connected() else color565(255, 0, 0)
-        display.draw_text8x8(x_start, y_pos, conn_status, conn_color)
-        y_pos += line_height
-        
-        # Date and Time
-        date, time = self.system_data.get_datetime_info()
-        display.draw_text8x8(x_start, y_pos, date[:10], text_color)
-        y_pos += 15
-        display.draw_text8x8(x_start, y_pos, time[:8], text_color)
-        y_pos += line_height
-        
-        # CPU Usage
-        cpu = self.system_data.get_cpu_percentage()
-        cpu_text = f"CPU:{cpu:4.1f}%"
-        display.draw_text8x8(x_start, y_pos, cpu_text, value_color)
-        y_pos += line_height
-        
-        # RAM Usage
-        ram_used, ram_total = self.system_data.get_ram_info()
-        ram_pct = self.system_data.get_ram_percentage()
-        ram_text = f"RAM:{ram_pct:4.1f}%"
-        display.draw_text8x8(x_start, y_pos, ram_text, value_color)
-        y_pos += 15
-        ram_detail = f"{ram_used:.1f}/{ram_total:.1f}GB"
-        display.draw_text8x8(x_start, y_pos, ram_detail[:12], text_color)
-        y_pos += line_height
-        
-        # Network
-        net_sent, net_recv = self.system_data.get_network_info()
-        net_sent_text = f"TX:{self.system_data.format_bytes(net_sent)[:8]}"
-        net_recv_text = f"RX:{self.system_data.format_bytes(net_recv)[:8]}"
-        display.draw_text8x8(x_start, y_pos, net_sent_text, value_color)
-        y_pos += 15
-        display.draw_text8x8(x_start, y_pos, net_recv_text, value_color)
+    def execute_calibrate_command(self):
+        """Execute calibration command"""
+        print("=== CALIBRATE COMMAND ===")
+        print("Starting touch calibration...")
+        # Add your calibration logic here
+        print("Calibration completed!")
+    
+    def execute_exit_command(self):
+        """Execute exit command"""
+        print("=== EXIT COMMAND ===")
+        print("Shutting down application...")
+        # Add cleanup logic here
+        if self.display_manager:
+            self.display_manager.set_backlight(False)
+        print("Application shutdown complete!")
     
     def get_button_manager(self):
         """Get the button manager instance"""
