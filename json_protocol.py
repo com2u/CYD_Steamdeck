@@ -166,8 +166,36 @@ def is_json_line(line: str) -> bool:
 
 
 def extract_system_data(message: dict):
-    """Convenience function to extract system data"""
-    return protocol.extract_system_data(message)
+    """
+    Extract system data from message, handling both old and new formats
+    Old format: {"type":"system_data","timestamp":123,"data":{"date":"...","cpu_percent":...}}
+    New format: {"type":"system_data","date":"...","cpu":...}
+    """
+    if not message or message.get("type") != "system_data":
+        return None
+    
+    # Check if this is the old format with nested data
+    if "data" in message:
+        data = message["data"]
+    else:
+        # New optimized format - data is directly in message
+        data = message
+    
+    # Extract and normalize field names
+    try:
+        extracted = {
+            "date": data.get("date", "No Data"),
+            "time": data.get("time", "No Data"),
+            "cpu_percent": data.get("cpu", data.get("cpu_percent", 0.0)),
+            "ram_used_gb": data.get("ram_used", data.get("ram_used_gb", 0.0)),
+            "ram_total_gb": data.get("ram_total", data.get("ram_total_gb", 0.0)),
+            "network_sent_mb": data.get("net_up", data.get("network_sent_mb", 0.0)),
+            "network_recv_mb": data.get("net_down", data.get("network_recv_mb", 0.0))
+        }
+        return extracted
+    except Exception as e:
+        print(f"Error extracting system data: {e}")
+        return None
 
 
 def extract_ack_info(message: dict):

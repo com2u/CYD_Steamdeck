@@ -211,21 +211,29 @@ class ServiceManager:
             # Get system data
             system_data = get_system_data()
             
-            # Create system data message
-            message = create_system_data_message(system_data)
+            # Create minimal optimized JSON (remove timestamp, shorten field names)
+            minimal_data = {
+                "type": "system_data",
+                "date": system_data["date"],
+                "time": system_data["time"],
+                "cpu": system_data["cpu_percent"],
+                "ram_used": system_data["ram_used_gb"],
+                "ram_total": system_data["ram_total_gb"],
+                "net_up": system_data["network_sent_mb"],
+                "net_down": system_data["network_recv_mb"]
+            }
             
             # Send via serial connection (this goes to ESP32's USB serial)
             if self.serial_handler and self.serial_handler.is_connected:
-                # Send the JSON message directly
-                self.serial_handler.send_message(message)
-                # Also send a debug marker that ESP32 can parse
-                self.serial_handler.send_message(f"ESP32_DATA:{message.strip()}")
-                print("System data sent to ESP32 via serial")
+                # Send ONLY ONE optimized message with explicit newline
+                import json
+                import time
+                message = json.dumps(minimal_data)
+                self.serial_handler.send_message(message)  # SerialHandler adds \n automatically
+                time.sleep(0.5)  # Add 500ms delay after sending to prevent transmission overlap
+                print("System data sent to ESP32 via serial (with delay)")
             else:
                 print("No serial connection - system data not sent")
-            
-            # ALSO send via debug output that ESP32 can see
-            print(f"PC_SYSTEM_DATA:{message.strip()}")
             
             # Log summary
             summary = get_formatted_summary()
