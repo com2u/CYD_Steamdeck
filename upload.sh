@@ -47,12 +47,6 @@ if [ $? -ne 0 ]; then
     ERROR=1
 fi
 
-echo "4/8 Uploading test.py..."
-python -m mpremote connect $PORT cp test.py :test.py
-if [ $? -ne 0 ]; then
-    echo "Failed to upload test.py"
-    ERROR=1
-fi
 
 echo "5/8 Uploading button.py..."
 python -m mpremote connect $PORT cp button.py :button.py

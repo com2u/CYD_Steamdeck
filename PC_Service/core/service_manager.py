@@ -14,6 +14,10 @@ from core.system_monitor import get_system_data, get_formatted_summary
 from commands.terminal_commands import open_terminal
 from commands.browser_commands import open_chrome
 from commands.system_commands import shutdown
+from commands.sound_commands import (
+    play_alarm, play_car, play_bell, play_dog,
+    play_police, play_tick, play_modem, play_applause
+)
 from config import SYSTEM_UPDATE_INTERVAL, SERVICE_NAME, VERSION
 
 
@@ -102,6 +106,20 @@ class ServiceManager:
             self._handle_command_message(command_message)
             return
         
+        # Check for PC_SOUND: prefix in debug output
+        if raw_message.startswith("PC_SOUND:"):
+            sound_name = raw_message.split("PC_SOUND:")[1].strip()
+            print(f"Received sound command from ESP32 debug: {sound_name}")
+            
+            # Create a sound message and handle it
+            sound_message = {
+                "type": "sound",
+                "sound": sound_name,
+                "timestamp": time.time()
+            }
+            self._handle_sound_message(sound_message)
+            return
+        
         # Try to parse as JSON
         message = parse_message(raw_message)
         
@@ -159,6 +177,24 @@ class ServiceManager:
                 )
                 self.serial_handler.send_message(error_ack)
     
+    def _handle_sound_message(self, message: Dict[str, Any]):
+        """Handle sound messages from ESP32"""
+        try:
+            sound_name = message.get("sound")
+            timestamp = message.get("timestamp", time.time())
+            
+            print(f"Received sound command: {sound_name}")
+            self.commands_processed += 1
+            self.last_command_time = time.time()
+            
+            # Execute the sound command
+            result = self._execute_sound_command(sound_name)
+            
+            print(f"Sound {sound_name} result: {result.message}")
+            
+        except Exception as e:
+            print(f"Error handling sound message: {e}")
+    
     def _handle_heartbeat_message(self, message: Dict[str, Any]):
         """Handle heartbeat messages from ESP32"""
         timestamp = message.get("timestamp", time.time())
@@ -175,6 +211,30 @@ class ServiceManager:
         else:
             from commands.command_executor import CommandResult
             return CommandResult(False, f"Unknown command: {action}")
+    
+    def _execute_sound_command(self, sound_name: str):
+        """Execute a sound command based on the sound name"""
+        sound_name_lower = sound_name.lower()
+        
+        if sound_name_lower == "alarm":
+            return play_alarm()
+        elif sound_name_lower == "car":
+            return play_car()
+        elif sound_name_lower == "bell":
+            return play_bell()
+        elif sound_name_lower == "dog":
+            return play_dog()
+        elif sound_name_lower == "police":
+            return play_police()
+        elif sound_name_lower == "tick":
+            return play_tick()
+        elif sound_name_lower == "modem":
+            return play_modem()
+        elif sound_name_lower == "applause":
+            return play_applause()
+        else:
+            from commands.command_executor import CommandResult
+            return CommandResult(False, f"Unknown sound: {sound_name}")
     
     def _handle_connection_changed(self, connected: bool):
         """Handle serial connection state changes"""

@@ -58,9 +58,11 @@ class CYDApplication:
         
         # Menu definitions
         self.menus = {
-            "main": ["Setup", "System", "Control"],
+            "main": ["Setup", "System", "Sound", "Control"],
             "setup": ["Calibrate", "WIFI", "EXIT"],
             "system": ["Control", "EXIT"],
+            "sound": ["Alarm", "Car", "Bell", "Dog", "-->"],
+            "sound2": ["<--", "Police", "Tick", "Modem", "Applause"],
             "control": ["Browser", "Terminal", "Shutdown", "EXIT"]
         }
         
@@ -106,10 +108,23 @@ class CYDApplication:
         elif button_text == "System":
             self.navigate_to_menu("system")
             self.show_system_info = True
+        elif button_text == "Sound":
+            self.navigate_to_menu("sound")
         elif button_text == "Control":
             self.navigate_to_menu("control")
+        elif button_text == "-->":
+            self.navigate_to_menu("sound2")
+        elif button_text == "<--":
+            # Return to main menu when "<--" is pressed
+            self.current_menu = "main"
+            self.menu_stack.clear()  # Clear navigation history
+            self.show_system_info = False
+            self.create_menu_buttons()
+            print("Navigated back to main menu")
         elif button_text in ["Browser", "Terminal", "Shutdown"]:
             self.execute_pc_command(button_text)
+        elif button_text in ["Alarm", "Car", "Bell", "Dog", "Police", "Tick", "Modem", "Applause"]:
+            self.execute_sound_command(button_text)
         elif button_text in ["Calibrate", "WIFI"]:
             print(f"{button_text} functionality will be implemented in the future")
         
@@ -147,6 +162,11 @@ class CYDApplication:
         pc_command = command_map.get(command, command.upper())
         print(f"PC_COMMAND:{pc_command}")
         print(f"Command {command} sent to PC")
+    
+    def execute_sound_command(self, sound_name):
+        """Execute sound command via USB debug output"""
+        print(f"PC_SOUND:{sound_name}")
+        print(f"Sound {sound_name} sent to PC")
         
     def init_hardware(self):
         """Initialize all hardware components"""
